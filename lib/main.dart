@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:math';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -25,12 +24,12 @@ class WakeOnLanApp extends StatelessWidget {
 }
 
 class Device {
-  final String name;
-  final String mac;
-  final String ip;
-  final String ping;
-  final String port;
-  final Color color;
+  String name;
+  String mac;
+  String ip;
+  String ping;
+  String port;
+  int colorValue;
   bool isSelected;
 
   Device({
@@ -39,11 +38,10 @@ class Device {
     required this.ip,
     required this.ping,
     required this.port,
-    required this.color,
+    required this.colorValue,
     this.isSelected = false,
   });
 
-  // Device nesnesini JSON formatına dönüştürme
   Map<String, dynamic> toJson() {
     return {
       'name': name,
@@ -51,12 +49,11 @@ class Device {
       'ip': ip,
       'ping': ping,
       'port': port,
-      'color': color.value, // Rengi int olarak saklayacağız
-      'isSelected': isSelected
+      'color': colorValue,
+      'isSelected': isSelected,
     };
   }
 
-  // JSON'dan Device nesnesi oluşturma
   static Device fromJson(Map<String, dynamic> json) {
     return Device(
       name: json['name'],
@@ -64,7 +61,7 @@ class Device {
       ip: json['ip'],
       ping: json['ping'],
       port: json['port'],
-      color: Color(json['color']),
+      colorValue: json['color'],
       isSelected: json['isSelected'] ?? false,
     );
   }
@@ -77,28 +74,38 @@ class HomeScreen extends StatefulWidget {
   _HomeScreenState createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   List<Device> devices = [];
-  final List<Color> colors = [
-    Colors.red,
-    Colors.blue,
-    Colors.green,
-    Colors.orange,
-    Colors.purple,
-    Colors.brown,
-    Colors.cyan,
-  ];
+  Device? selectedDevice;
+  bool isSending = false;
+  late AnimationController _controller;
+  late Animation<double> _animation;
+  bool buttonPressed = false;
 
   @override
   void initState() {
     super.initState();
     _loadDevices();
+    _controller = AnimationController(
+      duration: const Duration(seconds: 1),
+      vsync: this,
+    );
+
+    _animation = CurvedAnimation(parent: _controller, curve: Curves.easeInOut);
   }
 
-  // Cihazları yükleme
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadDevices() async {
     final prefs = await SharedPreferences.getInstance();
     final String? devicesString = prefs.getString('devices');
+    final String? selectedDeviceString = prefs.getString('selectedDevice');
+
     if (devicesString != null) {
       final List<dynamic> decodedDevices = jsonDecode(devicesString);
       setState(() {
@@ -107,70 +114,41 @@ class _HomeScreenState extends State<HomeScreen> {
             .toList();
       });
     }
+
+    // Son seçilen cihazı yükleme
+    if (selectedDeviceString != null) {
+      final Map<String, dynamic> selectedDeviceJson =
+          jsonDecode(selectedDeviceString);
+      setState(() {
+        selectedDevice = Device.fromJson(selectedDeviceJson);
+      });
+    }
   }
 
-  // Cihazları kaydetme
   Future<void> _saveDevices() async {
     final prefs = await SharedPreferences.getInstance();
     final String devicesString =
         jsonEncode(devices.map((device) => device.toJson()).toList());
     await prefs.setString('devices', devicesString);
+
+    // Seçilen cihazı kaydetme
+    if (selectedDevice != null) {
+      final String selectedDeviceString = jsonEncode(selectedDevice!.toJson());
+      await prefs.setString('selectedDevice', selectedDeviceString);
+    }
   }
 
-  // Seçilen cihazları silme
-  Future<void> _deleteSelectedDevices() async {
+  void _deleteDevice(Device device) {
     setState(() {
-      devices.removeWhere((device) => device.isSelected);
+      devices.remove(device);
     });
     _saveDevices();
   }
 
-  // MAC adresini normalize etme (xx-xx-xx-xx-xx-xx -> xx:xx:xx:xx:xx:xx)
   String _normalizeMacAddress(String macAddress) {
     return macAddress.replaceAll('-', ':');
   }
 
-  void _sendWakeOnLan(
-      String macAddress, String broadcastAddress, int port) async {
-    String normalizedMac = _normalizeMacAddress(macAddress);
-
-    // Magic Packet oluşturma
-    List<int> macBytes = _getMacBytes(normalizedMac);
-    List<int> magicPacket = List.filled(6, 0xFF) +
-        List.filled(16, macBytes).expand((x) => x).toList();
-
-    // Paket içeriğini konsola yazdır (debug amaçlı)
-    print("Magic Packet: $magicPacket");
-    print("MAC Address: $normalizedMac");
-    print("Broadcast Address: $broadcastAddress");
-    print("Port: $port");
-
-    // UDP üzerinden paket gönderme
-    try {
-      await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0).then((socket) {
-        socket.broadcastEnabled = true;
-
-        // Paket gönderimi
-        socket.send(
-          Uint8List.fromList(magicPacket),
-          InternetAddress(broadcastAddress),
-          port, // Kullanıcının belirlediği port numarası
-        );
-
-        // Soketi kapatıyoruz
-        socket.close();
-        print("Wake on LAN paketi başarıyla gönderildi!");
-      }).catchError((error) {
-        // Paket gönderiminde hata oluştu
-        print("UDP paket gönderim hatası: ${error.toString()}");
-      });
-    } catch (e) {
-      // Genel hata yönetimi
-      print("UDP paket gönderiminde bir hata oluştu: ${e.toString()}");
-    }
-  }
-
-  // MAC adresini bytelara çevirme
   List<int> _getMacBytes(String macAddress) {
     return macAddress
         .split(':')
@@ -178,105 +156,222 @@ class _HomeScreenState extends State<HomeScreen> {
         .toList();
   }
 
+  Future<void> _sendWakeOnLan(
+      String macAddress, String broadcastAddress, int port) async {
+    String normalizedMac = _normalizeMacAddress(macAddress);
+
+    List<int> macBytes = _getMacBytes(normalizedMac);
+    List<int> magicPacket = List.filled(6, 0xFF) +
+        List.filled(16, macBytes).expand((x) => x).toList();
+
+    print("Magic Packet: $magicPacket");
+    print("MAC Address: $normalizedMac");
+    print("Broadcast Address: $broadcastAddress");
+    print("Port: $port");
+
+    try {
+      await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0).then((socket) {
+        socket.broadcastEnabled = true;
+
+        socket.send(
+          Uint8List.fromList(magicPacket),
+          InternetAddress(broadcastAddress),
+          port,
+        );
+
+        socket.close();
+        print("Wake on LAN paketi başarıyla gönderildi!");
+      }).catchError((error) {
+        print("UDP paket gönderim hatası: ${error.toString()}");
+      });
+    } catch (e) {
+      print("UDP paket gönderiminde bir hata oluştu: ${e.toString()}");
+    }
+
+    setState(() {
+      isSending = true;
+      buttonPressed = true;
+    });
+
+    await _controller.forward();
+    await Future.delayed(const Duration(seconds: 2));
+    setState(() {
+      isSending = false;
+    });
+    _controller.reset();
+    setState(() {
+      buttonPressed = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Wake on LAN'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.delete),
-            onPressed: _deleteSelectedDevices, // Seçilen cihazları sil
-          ),
-        ],
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: devices.isEmpty
-                ? const Center(child: Text("Henüz cihaz eklenmedi."))
-                : ListView.builder(
-                    itemCount: devices.length,
-                    itemBuilder: (context, index) {
-                      final device = devices[index];
-                      return Card(
-                        color: device.color,
-                        child: ListTile(
-                          leading: Checkbox(
-                            value: device.isSelected,
-                            onChanged: (bool? value) {
+      drawer: Drawer(
+        child: Column(
+          children: [
+            const DrawerHeader(
+              child: Text('Kayıtlı Cihazlar'),
+            ),
+            Expanded(
+              child: devices.isEmpty
+                  ? const Center(child: Text("Henüz cihaz eklenmedi."))
+                  : ListView.builder(
+                      itemCount: devices.length,
+                      itemBuilder: (context, index) {
+                        final device = devices[index];
+                        return Container(
+                          color: Color(device.colorValue).withOpacity(0.2),
+                          child: ListTile(
+                            title: Text(device.name),
+                            subtitle: Text(device.ip),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.edit),
+                                  onPressed: () async {
+                                    final result = await Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                          builder: (context) =>
+                                              AddDeviceScreen(device: device)),
+                                    );
+                                    if (result != null) {
+                                      setState(() {
+                                        devices[index] = result;
+                                      });
+                                      _saveDevices();
+                                    }
+                                  },
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete),
+                                  onPressed: () {
+                                    _deleteDevice(device);
+                                  },
+                                ),
+                              ],
+                            ),
+                            onTap: () {
                               setState(() {
-                                device.isSelected = value ?? false;
+                                selectedDevice = device;
                               });
+                              _saveDevices();
+                              Navigator.pop(context);
                             },
                           ),
-                          title: Text(device.name),
-                          subtitle: Text(
-                              "MAC: ${device.mac}, IP: ${device.ip}, Port: ${device.port}"),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.power),
-                                onPressed: () {
-                                  // Wake on LAN gönder
-                                  _sendWakeOnLan(device.mac, device.ip,
-                                      int.parse(device.port));
-                                },
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.power_off),
-                                onPressed: () {
-                                  // "Off" fonksiyonu burada (İsteğe göre eklenebilir)
-                                },
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.edit),
-                                onPressed: () async {
-                                  // Cihazı düzenleme
-                                  final result = await Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                        builder: (context) => AddDeviceScreen(
-                                              device: device,
-                                            )),
-                                  );
-                                  if (result != null) {
-                                    setState(() {
-                                      devices[index] = result;
-                                    });
-                                    _saveDevices();
-                                  }
-                                },
-                              ),
-                            ],
+                        );
+                      },
+                    ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text(
+                'Uygulama Sürümü: 1.0.0',
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+            ),
+          ],
+        ),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (selectedDevice != null)
+              Column(
+                children: [
+                  Text(
+                    'Seçili Cihaz:',
+                    style: const TextStyle(fontSize: 18),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      color: Color(selectedDevice!.colorValue).withOpacity(0.2),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          selectedDevice!.name,
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            color: Color(selectedDevice!.colorValue),
                           ),
                         ),
-                      );
-                    },
+                        const SizedBox(height: 5),
+                        Text(
+                          selectedDevice!.ip,
+                          style: const TextStyle(fontSize: 16),
+                        ),
+                      ],
+                    ),
                   ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: ElevatedButton(
-              onPressed: () async {
-                final result = await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (context) => const AddDeviceScreen()),
+                ],
+              ),
+            const SizedBox(height: 40),
+            AnimatedBuilder(
+              animation: _animation,
+              builder: (context, child) {
+                return Transform.scale(
+                  scale: _animation.value * 0.1 + 1.0,
+                  child: ElevatedButton(
+                    onPressed: selectedDevice == null || isSending
+                        ? null
+                        : () {
+                            _sendWakeOnLan(
+                              selectedDevice!.mac,
+                              selectedDevice!.ip,
+                              int.parse(selectedDevice!.port),
+                            );
+                          },
+                    child: Icon(
+                      buttonPressed ? Icons.check : Icons.power_settings_new,
+                      size: 50,
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.all(20),
+                      shape: const CircleBorder(),
+                      //primary: Colors.blue,
+                    ),
+                  ),
                 );
-
-                if (result != null) {
-                  setState(() {
-                    devices.add(result);
-                  });
-                  _saveDevices(); // Cihaz eklendiğinde kaydet
-                }
               },
-              child: const Text('Ekle'),
             ),
-          ),
-        ],
+            const SizedBox(height: 20),
+            Expanded(child: Container()),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 20),
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(200, 50),
+                  textStyle: const TextStyle(fontSize: 18),
+                ),
+                onPressed: () async {
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => const AddDeviceScreen()),
+                  );
+                  if (result != null) {
+                    setState(() {
+                      devices.add(result);
+                    });
+                    _saveDevices();
+                  }
+                },
+                child: const Text('Ekle'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -298,27 +393,29 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
   final TextEditingController pingController = TextEditingController();
   final TextEditingController portController = TextEditingController();
 
-  final List<Color> colors = [
-    Colors.red,
-    Colors.blue,
-    Colors.green,
-    Colors.orange,
-    Colors.purple,
-    Colors.brown,
-    Colors.cyan,
+  final List<int> colorValues = [
+    Colors.red.value,
+    Colors.blue.value,
+    Colors.green.value,
+    Colors.orange.value,
+    Colors.purple.value,
+    Colors.brown.value,
+    Colors.cyan.value,
   ];
+
+  int selectedColorValue = Colors.blue.value; // Varsayılan renk
 
   @override
   void initState() {
     super.initState();
 
-    // Eğer düzenlenmekte olan bir cihaz varsa mevcut değerleri yükle
     if (widget.device != null) {
       nameController.text = widget.device!.name;
       macController.text = widget.device!.mac;
       ipController.text = widget.device!.ip;
       pingController.text = widget.device!.ping;
       portController.text = widget.device!.port;
+      selectedColorValue = widget.device!.colorValue;
     }
   }
 
@@ -372,25 +469,40 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
               ),
             ),
             const SizedBox(height: 20),
+            DropdownButton<int>(
+              value: selectedColorValue,
+              items: colorValues.map((colorValue) {
+                return DropdownMenuItem<int>(
+                  value: colorValue,
+                  child: Container(
+                    width: 100,
+                    height: 20,
+                    color: Color(colorValue),
+                  ),
+                );
+              }).toList(),
+              onChanged: (int? newColorValue) {
+                setState(() {
+                  selectedColorValue = newColorValue!;
+                });
+              },
+            ),
+            const SizedBox(height: 20),
             ElevatedButton(
               onPressed: () {
-                // Yeni cihaz oluşturma veya mevcut cihazı güncelleme
                 if (nameController.text.isNotEmpty &&
                     macController.text.isNotEmpty &&
                     ipController.text.isNotEmpty &&
                     pingController.text.isNotEmpty &&
                     portController.text.isNotEmpty) {
-                  final randomColor = widget.device?.color ??
-                      colors[Random().nextInt(colors.length)];
                   final newDevice = Device(
                     name: nameController.text,
                     mac: macController.text,
                     ip: ipController.text,
                     ping: pingController.text,
                     port: portController.text,
-                    color: randomColor,
+                    colorValue: selectedColorValue,
                   );
-
                   Navigator.pop(context, newDevice);
                 }
               },
