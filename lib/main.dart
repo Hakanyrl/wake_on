@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
 
 void main() {
   runApp(const WakeOnLanApp());
@@ -145,6 +146,51 @@ class _HomeScreenState extends State<HomeScreen>
     _saveDevices();
   }
 
+  Future<void> _scanDevices() async {
+    const int startRange = 1;
+    const int endRange = 254;
+    String subnet = "192.168.1."; // Ağınızdaki subnet
+    List<Future<void>> futures = [];
+
+    // Aynı anda birden fazla isteği paralel olarak yapmak için Future.wait kullanıyoruz
+    for (int i = startRange; i <= endRange; i++) {
+      String ip = '$subnet$i';
+      futures.add(_checkDevice(ip));
+    }
+
+    await Future.wait(futures); // Tüm paralel işlemlerin tamamlanmasını bekler
+    _saveDevices();
+  }
+
+// Tek bir IP adresini kontrol etmek için kullanılan fonksiyon
+  Future<void> _checkDevice(String ip) async {
+    try {
+      // Timeout süresini kısa tutarak hızlı bir tarama yapıyoruz
+      final response = await http
+          .get(Uri.parse('http://$ip:3000/info'))
+          .timeout(const Duration(seconds: 1)); // 1 saniyelik zaman aşımı
+
+      if (response.statusCode == 200) {
+        final deviceData = jsonDecode(response.body);
+        final newDevice = Device(
+          name: deviceData['name'],
+          mac: deviceData['mac'],
+          ip: deviceData['ip'],
+          ping: deviceData['ping'],
+          port: '9',
+          colorValue: Colors.blue.value,
+        );
+
+        setState(() {
+          devices.add(newDevice);
+        });
+      }
+    } catch (e) {
+      // Eğer istek başarısız olursa veya zaman aşımına uğrarsa bir şey yapmıyoruz
+      print('Cihaz bulunamadı: $ip');
+    }
+  }
+
   String _normalizeMacAddress(String macAddress) {
     return macAddress.replaceAll('-', ':');
   }
@@ -204,11 +250,43 @@ class _HomeScreenState extends State<HomeScreen>
     });
   }
 
+  Future<void> _shutdownComputer(String ping) async {
+    try {
+      final response = await http.get(Uri.parse('http://$ping:3000/shutdown'));
+      if (response.statusCode == 200) {
+        print("Bilgisayar kapatılıyor.");
+      } else {
+        print("Kapatma işlemi başarısız: ${response.statusCode}");
+      }
+    } catch (e) {
+      print(e);
+    }
+  }
+
+  Future<void> _restartComputer(String ping) async {
+    try {
+      final response = await http.get(Uri.parse('http://$ping:3000/restart'));
+      if (response.statusCode == 200) {
+        print("Bilgisayar yeniden başlatılıyor.");
+      } else {
+        print("Yeniden başlatma işlemi başarısız: ${response.statusCode}");
+      }
+    } catch (e) {
+      print(e);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Wake on LAN'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: _scanDevices, // "Cihaz Ara" butonu
+          ),
+        ],
       ),
       drawer: Drawer(
         child: Column(
@@ -339,13 +417,41 @@ class _HomeScreenState extends State<HomeScreen>
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.all(20),
                       shape: const CircleBorder(),
-                      //primary: Colors.blue,
                     ),
                   ),
                 );
               },
             ),
             const SizedBox(height: 20),
+
+            // Bilgisayarı kapatma butonu
+            ElevatedButton(
+              onPressed: selectedDevice == null
+                  ? null
+                  : () {
+                      _shutdownComputer(selectedDevice!.ping);
+                    },
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(200, 50),
+                textStyle: const TextStyle(fontSize: 18),
+              ),
+              child: const Text('Bilgisayarı Kapat'),
+            ),
+            const SizedBox(height: 20),
+
+            // Bilgisayarı yeniden başlatma butonu
+            ElevatedButton(
+              onPressed: selectedDevice == null
+                  ? null
+                  : () {
+                      _restartComputer(selectedDevice!.ping);
+                    },
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(200, 50),
+                textStyle: const TextStyle(fontSize: 18),
+              ),
+              child: const Text('Bilgisayarı Yeniden Başlat'),
+            ),
             Expanded(child: Container()),
             Padding(
               padding: const EdgeInsets.only(bottom: 20),
