@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
-import 'package:vibration/vibration.dart';
 
 void main() {
   runApp(const WakeOnLanApp());
@@ -16,8 +15,9 @@ class WakeOnLanApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Wake on LAN',
+      title: 'Wake On Lan',
       theme: ThemeData(
+        brightness: Brightness.dark, // Arka planı koyu yapmak için
         primarySwatch: Colors.blue,
       ),
       home: const HomeScreen(),
@@ -84,6 +84,9 @@ class _HomeScreenState extends State<HomeScreen>
   late AnimationController _controller;
   late Animation<double> _animation;
   bool buttonPressed = false;
+  PageController _pageController =
+      PageController(viewportFraction: 0.6); // Daha akıcı kaydırma için
+  int _currentPage = 1; // Ortadaki buton
 
   @override
   void initState() {
@@ -117,7 +120,6 @@ class _HomeScreenState extends State<HomeScreen>
       });
     }
 
-    // Son seçilen cihazı yükleme
     if (selectedDeviceString != null) {
       final Map<String, dynamic> selectedDeviceJson =
           jsonDecode(selectedDeviceString);
@@ -133,7 +135,6 @@ class _HomeScreenState extends State<HomeScreen>
         jsonEncode(devices.map((device) => device.toJson()).toList());
     await prefs.setString('devices', devicesString);
 
-    // Seçilen cihazı kaydetme
     if (selectedDevice != null) {
       final String selectedDeviceString = jsonEncode(selectedDevice!.toJson());
       await prefs.setString('selectedDevice', selectedDeviceString);
@@ -150,26 +151,23 @@ class _HomeScreenState extends State<HomeScreen>
   Future<void> _scanDevices() async {
     const int startRange = 1;
     const int endRange = 254;
-    String subnet = "192.168.1."; // Ağınızdaki subnet
+    String subnet = "192.168.1.";
     List<Future<void>> futures = [];
 
-    // Aynı anda birden fazla isteği paralel olarak yapmak için Future.wait kullanıyoruz
     for (int i = startRange; i <= endRange; i++) {
       String ip = '$subnet$i';
       futures.add(_checkDevice(ip));
     }
 
-    await Future.wait(futures); // Tüm paralel işlemlerin tamamlanmasını bekler
+    await Future.wait(futures);
     _saveDevices();
   }
 
-// Tek bir IP adresini kontrol etmek için kullanılan fonksiyon
   Future<void> _checkDevice(String ip) async {
     try {
-      // Timeout süresini kısa tutarak hızlı bir tarama yapıyoruz
       final response = await http
           .get(Uri.parse('http://$ip:3000/info'))
-          .timeout(const Duration(seconds: 1)); // 1 saniyelik zaman aşımı
+          .timeout(const Duration(seconds: 1));
 
       if (response.statusCode == 200) {
         final deviceData = jsonDecode(response.body);
@@ -187,7 +185,6 @@ class _HomeScreenState extends State<HomeScreen>
         });
       }
     } catch (e) {
-      // Eğer istek başarısız olursa veya zaman aşımına uğrarsa bir şey yapmıyoruz
       print('Cihaz bulunamadı: $ip');
     }
   }
@@ -211,11 +208,6 @@ class _HomeScreenState extends State<HomeScreen>
     List<int> magicPacket = List.filled(6, 0xFF) +
         List.filled(16, macBytes).expand((x) => x).toList();
 
-    print("Magic Packet: $magicPacket");
-    print("MAC Address: $normalizedMac");
-    print("Broadcast Address: $broadcastAddress");
-    print("Port: $port");
-
     try {
       await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0).then((socket) {
         socket.broadcastEnabled = true;
@@ -227,7 +219,6 @@ class _HomeScreenState extends State<HomeScreen>
         );
 
         socket.close();
-        print("Wake on LAN paketi başarıyla gönderildi!");
       }).catchError((error) {
         print("UDP paket gönderim hatası: ${error.toString()}");
       });
@@ -281,13 +272,8 @@ class _HomeScreenState extends State<HomeScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Wake on LAN'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: _scanDevices, // "Cihaz Ara" butonu
-          ),
-        ],
+        title: const Text(''), // Başlık boş bırakıldı
+        centerTitle: false, // Başlığı ortaya hizalayabilirsiniz (isteğe bağlı)
       ),
       drawer: Drawer(
         child: Column(
@@ -350,134 +336,221 @@ class _HomeScreenState extends State<HomeScreen>
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Text(
-                'Uygulama Sürümü: 1.0.1',
+                'Uygulama Sürümü: 0.1.1',
                 style: TextStyle(color: Colors.grey[600]),
               ),
             ),
           ],
         ),
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (selectedDevice != null)
-              Column(
+      body: Column(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // Üst kısım: Seçili cihaz ve diğer içerikler
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.start,
                 children: [
-                  Text(
-                    'Seçili Cihaz:',
-                    style: const TextStyle(fontSize: 18),
-                  ),
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(10),
-                      color: Color(selectedDevice!.colorValue).withOpacity(0.2),
-                    ),
-                    child: Column(
+                  const SizedBox(height: 30),
+                  if (selectedDevice != null)
+                    Column(
                       children: [
                         Text(
-                          selectedDevice!.name,
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: Color(selectedDevice!.colorValue),
+                          'Seçili Cihaz:',
+                          style: const TextStyle(fontSize: 18),
+                        ),
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(10),
+                            color: Color(selectedDevice!.colorValue)
+                                .withOpacity(0.2),
+                          ),
+                          child: Column(
+                            children: [
+                              Text(
+                                selectedDevice!.name,
+                                style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(selectedDevice!.colorValue),
+                                ),
+                              ),
+                              const SizedBox(height: 5),
+                              Text(
+                                selectedDevice!.ip,
+                                style: const TextStyle(fontSize: 16),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 5),
-                        Text(
-                          selectedDevice!.ip,
-                          style: const TextStyle(fontSize: 16),
-                        ),
                       ],
+                    ),
+                  const SizedBox(height: 40),
+                  SizedBox(
+                    height: 100,
+                    child: PageView.builder(
+                      controller: _pageController,
+                      itemCount: 3,
+                      onPageChanged: (int index) {
+                        setState(() {
+                          _currentPage = index;
+                        });
+                      },
+                      itemBuilder: (context, index) {
+                        bool isActive = index == _currentPage;
+                        return CircularButton(
+                          icon: getIconForIndex(index),
+                          isActive: isActive,
+                          onPressed:
+                              isActive ? () => _onButtonPressed(index) : null,
+                        );
+                      },
                     ),
                   ),
                 ],
               ),
-            const SizedBox(height: 40),
-            AnimatedBuilder(
-              animation: _animation,
-              builder: (context, child) {
-                return Transform.scale(
-                  scale: _animation.value * 0.1 + 1.0,
-                  child: ElevatedButton(
-                    onPressed: selectedDevice == null || isSending
-                        ? null
-                        : () {
-                            _sendWakeOnLan(
-                              selectedDevice!.mac,
-                              selectedDevice!.ip,
-                              int.parse(selectedDevice!.port),
-                            );
-                          },
-                    child: Icon(
-                      buttonPressed ? Icons.check : Icons.power_settings_new,
-                      size: 50,
+            ),
+          ),
+          // Alt kısım: Butonlar
+          Padding(
+            padding:
+                const EdgeInsets.only(bottom: 16.0, left: 16.0, right: 16.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                // Sol aşağıdaki "Cihaz Ekle" butonu
+                SizedBox(
+                  width: 160,
+                  child: TextButton.icon(
+                    onPressed: () async {
+                      final result = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (context) => const AddDeviceScreen()),
+                      );
+                      if (result != null) {
+                        setState(() {
+                          devices.add(result);
+                        });
+                        _saveDevices();
+                      }
+                    },
+                    icon: const Icon(Icons.add, size: 30),
+                    label: const Text(
+                      "Cihaz Ekle",
+                      style: TextStyle(fontSize: 18),
                     ),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.all(20),
-                      shape: const CircleBorder(),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.blue,
+                      padding: const EdgeInsets.symmetric(vertical: 15),
                     ),
                   ),
-                );
-              },
-            ),
-            const SizedBox(height: 20),
-
-            // Bilgisayarı kapatma butonu
-            ElevatedButton(
-              onPressed: selectedDevice == null
-                  ? null
-                  : () {
-                      _shutdownComputer(selectedDevice!.ping);
-                    },
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(200, 50),
-                textStyle: const TextStyle(fontSize: 18),
-              ),
-              child: const Text('Bilgisayarı Kapat'),
-            ),
-            const SizedBox(height: 20),
-
-            // Bilgisayarı yeniden başlatma butonu
-            ElevatedButton(
-              onPressed: selectedDevice == null
-                  ? null
-                  : () {
-                      _restartComputer(selectedDevice!.ping);
-                    },
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(200, 50),
-                textStyle: const TextStyle(fontSize: 18),
-              ),
-              child: const Text('Bilgisayarı Yeniden Başlat'),
-            ),
-            Expanded(child: Container()),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 20),
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  minimumSize: const Size(200, 50),
-                  textStyle: const TextStyle(fontSize: 18),
                 ),
-                onPressed: () async {
-                  final result = await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (context) => const AddDeviceScreen()),
-                  );
-                  if (result != null) {
-                    setState(() {
-                      devices.add(result);
-                    });
-                    _saveDevices();
-                  }
-                },
-                child: const Text('Ekle'),
-              ),
+                // Sağ aşağıdaki "Cihaz Ara" butonu
+                SizedBox(
+                  width: 160,
+                  child: TextButton.icon(
+                    onPressed: _scanDevices,
+                    icon: const Icon(Icons.search_sharp, size: 30),
+                    label: const Text(
+                      "Cihaz Ara",
+                      style: TextStyle(fontSize: 18),
+                    ),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.blue,
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  IconData getIconForIndex(int index) {
+    switch (index) {
+      case 0:
+        return Icons.power_settings_new;
+      case 1:
+        return Icons.restart_alt;
+      case 2:
+        return Icons.power_off;
+      default:
+        return Icons.help;
+    }
+  }
+
+  void _onButtonPressed(int index) {
+    if (selectedDevice == null) {
+      print("Lütfen önce bir cihaz seçin.");
+      return;
+    }
+
+    switch (index) {
+      case 0:
+        print('Wake on LAN butonu tıklandı');
+        _sendWakeOnLan(selectedDevice!.mac, selectedDevice!.ip,
+            int.parse(selectedDevice!.port));
+
+        break;
+      case 1:
+        print('Yeniden Başlat butonu tıklandı');
+        _restartComputer(selectedDevice!.ping);
+        break;
+      case 2:
+        print('Kapat butonu tıklandı');
+        _shutdownComputer(selectedDevice!.ping);
+        break;
+    }
+  }
+}
+
+class CircularButton extends StatelessWidget {
+  final IconData icon;
+  final bool isActive;
+  final VoidCallback? onPressed;
+
+  const CircularButton({
+    super.key,
+    required this.icon,
+    required this.isActive,
+    this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        width: isActive ? 80 : 70, // Seçildiğinde biraz büyütülmüş boyut
+        height: isActive ? 80 : 70,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: isActive
+              ? const Color.fromARGB(255, 228, 3, 3)
+              : Colors.grey.withOpacity(0.5),
+          boxShadow: isActive
+              ? [
+                  BoxShadow(
+                      color: const Color.fromARGB(66, 202, 177, 177),
+                      blurRadius: 8,
+                      spreadRadius: 1)
+                ]
+              : [], // Aktif olan buton gölgeli olacak
+        ),
+        child: Icon(
+          icon,
+          size: 40, // İkonun boyutu sabit kalacak
+          color: isActive ? Colors.white : Colors.grey[400],
         ),
       ),
     );
@@ -510,7 +583,7 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
     Colors.cyan.value,
   ];
 
-  int selectedColorValue = Colors.blue.value; // Varsayılan renk
+  int selectedColorValue = Colors.blue.value;
 
   @override
   void initState() {
@@ -532,70 +605,78 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
       appBar: AppBar(
         title: Text(widget.device == null ? 'Cihaz Ekle' : 'Cihazı Düzenle'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: ListView(
-          children: <Widget>[
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(
-                labelText: 'Cihaz İsmi',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: macController,
-              decoration: const InputDecoration(
-                labelText: 'MAC Adresi',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: ipController,
-              decoration: const InputDecoration(
-                labelText: 'IP Adresi (Broadcast IP)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: pingController,
-              decoration: const InputDecoration(
-                labelText: 'Ping Adresi',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: portController,
-              decoration: const InputDecoration(
-                labelText: 'Port',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 20),
-            DropdownButton<int>(
-              value: selectedColorValue,
-              items: colorValues.map((colorValue) {
-                return DropdownMenuItem<int>(
-                  value: colorValue,
-                  child: Container(
-                    width: 100,
-                    height: 20,
-                    color: Color(colorValue),
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                children: <Widget>[
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Cihaz İsmi',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
-                );
-              }).toList(),
-              onChanged: (int? newColorValue) {
-                setState(() {
-                  selectedColorValue = newColorValue!;
-                });
-              },
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: macController,
+                    decoration: const InputDecoration(
+                      labelText: 'MAC Adresi',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: ipController,
+                    decoration: const InputDecoration(
+                      labelText: 'IP Adresi (Broadcast IP)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: pingController,
+                    decoration: const InputDecoration(
+                      labelText: 'Ping Adresi',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: portController,
+                    decoration: const InputDecoration(
+                      labelText: 'Port',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  DropdownButton<int>(
+                    value: selectedColorValue,
+                    items: colorValues.map((colorValue) {
+                      return DropdownMenuItem<int>(
+                        value: colorValue,
+                        child: Container(
+                          width: 100,
+                          height: 20,
+                          color: Color(colorValue),
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (int? newColorValue) {
+                      setState(() {
+                        selectedColorValue = newColorValue!;
+                      });
+                    },
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 20),
-            ElevatedButton(
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: ElevatedButton(
               onPressed: () {
                 if (nameController.text.isNotEmpty &&
                     macController.text.isNotEmpty &&
@@ -613,10 +694,14 @@ class _AddDeviceScreenState extends State<AddDeviceScreen> {
                   Navigator.pop(context, newDevice);
                 }
               },
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(200, 50),
+                textStyle: const TextStyle(fontSize: 18),
+              ),
               child: const Text('Kaydet'),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
