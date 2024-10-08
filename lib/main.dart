@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
+import 'package:vibration/vibration.dart';
 
 void main() {
   runApp(const WakeOnLanApp());
@@ -349,7 +350,7 @@ class _HomeScreenState extends State<HomeScreen>
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Text(
-                'Uygulama Sürümü: 1.0.0',
+                'Uygulama Sürümü: 1.0.1',
                 style: TextStyle(color: Colors.grey[600]),
               ),
             ),

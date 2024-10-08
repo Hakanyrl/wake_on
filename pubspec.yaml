@@ -12,7 +12,8 @@ dependencies:
     sdk: flutter
   shared_preferences: ^2.0.10
   cupertino_icons: ^1.0.8
-  http: ^0.13.3   
+  vibration: ^1.7.3
+  http: ^0.13.3
 
 dev_dependencies:
   flutter_test:
